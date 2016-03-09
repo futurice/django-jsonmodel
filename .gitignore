@@ -1,2 +1,6 @@
 *.pyc
-/dist/
+tags
+dist
+*egg-info/
+*__pycache__/
+.coverage

@@ -1,0 +1,2 @@
+graft djangojsonmodel
+global-exclude *.pyc

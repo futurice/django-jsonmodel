@@ -1,11 +1,17 @@
-:authors: Jussi Vaihia
-:organization: Futurice
-:copyright: 2014 Futurice
+Django JSON Models [django-jsonmodels](https://github.com/futurice/django-jsonmodels) [![Build Status](https://travis-ci.org/futurice/django-jsonmodels.svg?branch=master)](https://travis-ci.org/futurice/django-jsonmodels)
+==================
 
-Django JSON Model – Convert model meta information for use in JavaScript
-========================================================================
+Convert Django Models into JSON representations.
 
-::
+Why?
+----
 
-    from djangojsonmodel.core import jsmodels
-    jsmodels(apps=['contenttypes'])
+Transform from the backend to the frontend without losing a beat.
+
+Usage
+-----
+
+```
+from djangojsonmodel.convert import jsmodels
+jsmodels(applications=['contenttypes'])
+```

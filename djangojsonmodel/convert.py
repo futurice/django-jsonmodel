@@ -1,21 +1,27 @@
+import django
 from django.contrib.contenttypes.models import ContentType
-from django.core.urlresolvers import reverse
 from django.core.serializers.json import DjangoJSONEncoder
+from django.core.urlresolvers import reverse
 from django.db import models
-from django.db.models import get_app
-from django.db.models.related import RelatedObject
+from django.db.models.fields.related import ForeignObjectRel
 from django.template import Context, RequestContext, loader, Template
 from django.template.loader import render_to_string
-from django.utils.datastructures import SortedDict
-from django.core.serializers.json import DjangoJSONEncoder
+from django.apps import apps
+
+from collections import OrderedDict
 
 from decimal import Decimal
 import datetime
-import json, copy
+import json
+import copy
 import inspect
 import logging
 
-log = logging.getLogger(__name__)
+import six
+
+from djangojsonmodel.db import m2m_relations, get_all_related_objects, get_field, is_reverse_fk
+
+logger = logging.getLogger(__name__)
 
 class DotDictRaises(dict):
     __getattr__= dict.__getitem__
@@ -37,21 +43,17 @@ class TZAwareJSONEncoder(DjangoJSONEncoder):
 def to_json(data):
     return json.dumps(data, encoding='utf-8', cls=DjangoJSONEncoder, ensure_ascii=False, separators=(',',':'))
 
-
 def get_url(route, args=[], kwargs={}):
     try:
         return reverse(route, args=args, kwargs=kwargs)
-    except Exception, e:
+    except Exception as e:
         return ''
-
-def is_reverse_fk(field, model):# 1:M
-    return hasattr(field, 'related') and isinstance(field.related.parent_model(), model)
 
 def implied_relations():
     phantom_models = [{'model': ContentType,
         'field': 'content_type',
         'relname': 'contenttype',
-        'verbose_name': 'Content Type'}]
+        'verbose_name': 'Content Type',}]
     fields = []
     for k, model in enumerate(phantom_models):
         f = DotDict()
@@ -61,14 +63,14 @@ def implied_relations():
         rel_name_model = model['relname']
         f.m2m = False
         f.reverse_fk = True
-        f.url = get_url('%s-%s'%(reverse_parent._meta.module_name, rel_name_model), args=[1]).replace('1', ':id')
-        f.url_id = get_url('%s-%s'%(reverse_parent._meta.module_name, rel_name_model), args=[1,2]).replace('1', ':id').replace('2', ':relid')
+        f.url = get_url('%s-%s'%(reverse_parent._meta.object_name, rel_name_model), args=[1]).replace('1', ':id')
+        f.url_id = get_url('%s-%s'%(reverse_parent._meta.object_name, rel_name_model), args=[1,2]).replace('1', ':id').replace('2', ':relid')
         f.lookup_url = get_url('%s-list'%(rel_name_model))
         f.child = rel_name_model
         f.model = rel_name_model
         f.name = rel_name
-        f.verbose_name = unicode(model['verbose_name'])
-        f.type = 'marcopolo'
+        f.verbose_name = model['verbose_name']
+        f.type = 'fk'
         fields.append(f)
     return fields
 
@@ -79,41 +81,42 @@ def handle(f, k):
     if (f.null is True) or (f.blank is True) or (f.default is not models.fields.NOT_PROVIDED):
         m.required = False
 
-    if f.default:
+    m.default = None
+    if hasattr(f, 'default'):
         if callable(f.default):
             if inspect.isclass(f.default):
                 pass
             else:
                 m.default = f.default()
             if(isinstance(m.default, models.Model)):
-                log.debug("NOTE: tried to use instance {} as default value, setting to None".format(type(m.default)))
+                logger.debug("NOTE: tried to use instance {} as default value, setting to None".format(type(m.default)))
                 m.default = None
         else:
             m.default = f.default
 
     def reverse_fk(f, k, m):
-        rel_name = f.rel.related_name or (f.opts.module_name)
+        rel_name = f.rel.related_name or (f.opts.object_name)
         reverse_parent = f.related.parent_model
         parent_model = f.model
-        rel_name_model = f.model._meta.module_name
+        rel_name_model = f.model._meta.object_name
         m.m2m = True
         m.reverse_fk = True
-        m.url = get_url('%s-%s'%(reverse_parent._meta.module_name, rel_name_model), args=[1]).replace('1', ':id')
-        m.url_id = get_url('%s-%s'%(reverse_parent._meta.module_name, rel_name_model), args=[1,2]).replace('1', ':id').replace('2', ':relid')
+        m.url = get_url('%s-%s'%(reverse_parent._meta.object_name, rel_name_model), args=[1]).replace('1', ':id')
+        m.url_id = get_url('%s-%s'%(reverse_parent._meta.object_name, rel_name_model), args=[1,2]).replace('1', ':id').replace('2', ':relid')
         m.lookup_url = get_url('%s-list'%(rel_name_model))
         m.child = rel_name_model
         m.model = rel_name_model
         if hasattr(parent_model, 'default_field'):
             m.dname = parent_model.default_field()
         m.name = rel_name
-        m.verbose_name = unicode(f.model._meta.verbose_name)
+        m.verbose_name = f.model._meta.verbose_name
         
     if isinstance(f, models.ForeignKey):
         if is_reverse_fk(f, k):
             reverse_fk(f, k, m)
         else:
-            parent_model = f.related.parent_model
-            rel_name = parent_model._meta.module_name
+            parent_model = get_field(f).model
+            rel_name = parent_model._meta.object_name
             m.fk = True
             m.lookup_url = get_url('%s-list'%(rel_name))
             m.child = rel_name
@@ -121,26 +124,26 @@ def handle(f, k):
             if hasattr(parent_model, 'default_field'):
                 m.dname = parent_model.default_field()
             m.name = f.name
-            m.verbose_name = unicode(f.verbose_name)
+            m.verbose_name = f.verbose_name
     elif isinstance(f, models.ManyToManyField):
-        rel_name = f.related.parent_model._meta.module_name
+        rel_name = get_field(f).model._meta.object_name
         m.m2m = True
         m.model = rel_name
-        m.url = get_url('%s-%s-list'%(k._meta.module_name, rel_name), args=[1]).replace('1', ':id')
-        m.url_id = get_url('%s-%s-detail'%(k._meta.module_name, rel_name), args=[1,2]).replace('1', ':id').replace('2', ':relid')
+        m.url = get_url('%s-%s-list'%(k._meta.object_name, rel_name), args=[1]).replace('1', ':id')
+        m.url_id = get_url('%s-%s-detail'%(k._meta.object_name, rel_name), args=[1,2]).replace('1', ':id').replace('2', ':relid')
         m.lookup_url = get_url('%s-list'%(rel_name))
         m.required = False
         m.name = f.name
-        m.verbose_name = unicode(f.verbose_name)
+        m.verbose_name = f.verbose_name
     else:
         # non-relational fields
-        m.verbose_name = unicode(f.verbose_name)
-        m.name = unicode(f.name)
+        m.verbose_name = getattr(f, 'verbose_name', None)
+        m.name = f.name
     
     jtype = None
-    for fk, fv in FIELD_MAP.iteritems():
+    for fk, fv in six.iteritems(FIELD_MAP):
         if is_reverse_fk(f, k):
-            jtype = FIELD_MAP[models.related.RelatedObject]
+            jtype = FIELD_MAP[ForeignObjectRel]
             break
         if isinstance(f, fk):
             jtype = fv
@@ -148,17 +151,18 @@ def handle(f, k):
     if jtype:
         m.type = jtype
 
-    choices = f.choices or getattr(f, 'choices_ui', None)
+    choices = getattr(f, 'choices', {})
     if choices:
-        m.choices = SortedDict(choices)
+        m.choices = OrderedDict(choices)
+        m.type = 'select'
+    choices_ui = getattr(f, 'choices_ui', {})
+
+    if choices_ui:
+        m.choices_ui = OrderedDict(choices_ui)
         m.type = 'select'
 
     return m
 
-"""
-Default mapping of model fields to JS widgets.
-(27/1/2014) xeditable does not support bootstrap3 datetime
-"""
 FIELD_MAP = {
 models.CharField:'text',
 models.DateTimeField:'datetime',
@@ -166,13 +170,13 @@ models.BooleanField:'text',
 models.EmailField:'text',
 models.TextField:'textarea',
 models.IntegerField:'text',
-models.related.RelatedObject:'marcopolo',
-models.ForeignKey:'select2',
-models.ManyToManyField:'marcopolo',
+ForeignObjectRel:'fk',
+models.ForeignKey:'fk',
+models.ManyToManyField:'m2m',
 models.DecimalField:'text',
 }
 
-def create(apps=[], field_map={}):
+def create(applications=[], field_map={}):
     """
     url: POST
     url_id: PATCH
@@ -181,105 +185,37 @@ def create(apps=[], field_map={}):
     field_map = field_map or FIELD_MAP
     result = DotDict()
     result.models = {}
-    for k in models.get_models():
-        if k._meta.app_label in apps:
+    for k in apps.get_models():
+        if k._meta.app_label in applications:
             m = DotDict()
             m.url = None
-            m.name = k._meta.module_name
+            m.name = k._meta.object_name
             m.dname = 'name'
             if hasattr(k, 'default_field'):
                 m.dname = k.default_field()
             m.fields = []
-            m.url = get_url('%s-list'%(k._meta.module_name))
-            m.url_id = get_url('%s-detail'%(k._meta.module_name), args=[1]).replace('1', ':id')
+            m.url = get_url('%s-list'%(k._meta.object_name))
+            m.url_id = get_url('%s-detail'%(k._meta.object_name), args=[1]).replace('1', ':id')
             # FIELDS+FOREIGNKEYS
-            for f in k._meta.fields:
+            for f in k._meta.get_fields():
                 jsfield = handle(f, k)
-                if jsfield.get('type'):
-                    m.fields.append(jsfield)
-            # M2M
-            for f in k._meta.get_m2m_with_model():
-                jsfield = handle(f[0], k)
-                if jsfield.get('type'):
-                    m.fields.append(jsfield)
-            # reverse relations
-            for f in k._meta.get_all_related_objects():
-                jsfield = handle(f.field, k)
                 if jsfield.get('type'):
                     m.fields.append(jsfield)
             # phantoms
             for imprel in implied_relations():
                 m.fields.append(imprel)
-            result.models.setdefault(k._meta.module_name, {})
-            result.models[k._meta.module_name] = m
+            result.models.setdefault(k._meta.object_name, {})
+            result.models[k._meta.object_name] = m
     return result
 
-tpls = {
-    'xeditable': {'tpl': 'common/xeditable.html'},
-    'xeditable_search': {'tpl': 'common/xeditable_search.html'},
-}
-
-
-def to_html(model, fields, extra={}, html=True):
-    """ return HTML for model, for given fields """
-    r = []
-    include_fields_meta = {
-        'source': {'quote': False},
-        'api': {'quote': False},
-    }
-    include = []
-    for k in model['fields']:
-        name = k['name']
-        row = {}
-        if name in fields:
-            name_extra = extra.get(name, {})
-            tpl = name_extra.get('tpl', 'xeditable')
-            c = dict(
-                field=name,
-                full=name,
-                api=None,
-                datatype=None,
-                source=None,
-            )
-            c.update(name_extra)
-            keys = c.keys()
-            for key in keys:
-                row[key] = c[key]
-            row['tpl'] = tpls[tpl]['tpl']
-            r.append(row)
-    if html:
-        out = []
-        for k in r:
-            data = "{{% xslot data='{0}' %}}".format(to_json(k))
-            out.append(data)
-        return "\n".join(out)
-    return r
-
-def to_html2(model):
-    """ initial HTML for styling form pages """
-    renderers = {
-        'datetime': 'xeditable',
-        'text': 'xeditable',
-        'textarea': 'xeditable',
-    }
-    def get_tpl(name):
-        if renderers.has_key(name):
-            name = copy.deepcopy(renderers[name])
-        return 'common/{0}.html'.format(name)
-    html = []
-    for k in model['fields']:
-        row = render_to_string(get_tpl(k['type']), k)
-        html.append(row)
-    return "\n".join(html)
-
-def jsmodels(apps=[], filename=None):
-    rs = create(apps)
+def jsmodels(applications=[], filename=None):
+    rs = create(applications)
 
     if filename:
         formjs = to_json(rs);
         f = open(filename, 'w+')
         f.write("q.form = %s;" % (formjs))
-        log.debug("jsmodels(): {}".format(filename))
+        logger.debug("jsmodels(): {}".format(filename))
 
     return rs
 
