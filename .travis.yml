@@ -1,0 +1,20 @@
+sudo: false
+language: python
+env:
+  - DJANGO=1.9
+python:
+  - 2.7
+  - 3.4
+script: python setup.py test
+notifications:
+  email:
+    - jussi.vaihia@futurice.com
+install:
+  - pip install Django==$DJANGO
+  - pip install djangorestframework>=3.3.2
+  - pip install six
+branches:
+  only:
+    - master
+
+
