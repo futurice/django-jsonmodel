@@ -53,6 +53,8 @@ def convert_field(f, model):
     m.model = get_field(f).model._meta.object_name
     m.dname = default_field(model)
     m.verbose_name = getattr(f, 'verbose_name', None)
+    m.choices = OrderedDict(getattr(f, 'choices', {}))
+    m.choices_ui = OrderedDict(getattr(f, 'choices_ui', {}))
     return m
 
 def create(applications=[]):
