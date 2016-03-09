@@ -1,4 +1,4 @@
-Django JSON Models [django-jsonmodel](https://github.com/futurice/django-jsonmodel) [![Build Status](https://travis-ci.org/futurice/django-jsonmodel.svg?branch=master)](https://travis-ci.org/futurice/django-jsonmodel)
+Django JSON Models [![Build Status](https://travis-ci.org/futurice/django-jsonmodel.svg?branch=master)](https://travis-ci.org/futurice/django-jsonmodel)
 ==================
 
 Convert Django Models into JSON representations.
