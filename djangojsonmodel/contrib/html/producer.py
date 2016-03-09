@@ -1,3 +1,6 @@
+from django.template import Context, RequestContext, loader, Template
+from django.template.loader import render_to_string
+
 tpls = {
     'xeditable': {'tpl': 'common/xeditable.html'},
     'xeditable_search': {'tpl': 'common/xeditable_search.html'},
