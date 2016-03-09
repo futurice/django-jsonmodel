@@ -16,14 +16,13 @@ class ConversionTest(TestCase):
         out = jsmodels(applications=['contenttypes'])
         self.assertEquals(sorted(out['models'].keys()), ['ContentType'])
         self.assertEquals(
-                list(filter(lambda x: x.get('child','')=='contenttype',
+                list(filter(lambda x: x.get('name','')=='logentry',
                        out['models']['ContentType']['fields']))[0]['reverse_fk'],
                 True)
 
     def test_convert_test(self):
         out = jsmodels(applications=['test',])
-        pp(out)
         self.assertEquals(sorted(out['models'].keys()), ['Account', 'Computer', 'Person'])
         self.assertEquals(
                 sorted([k['name'] for k in out['models']['Person']['fields']]),
-                ['account', 'age','computers','content_type','created','id','name'])
+                ['account', 'age','computers','created','id','name'])

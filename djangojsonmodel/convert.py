@@ -1,7 +1,6 @@
 import django
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
-from django.db.models.fields.related import ForeignObjectRel
 from django.apps import apps
 
 from collections import OrderedDict
@@ -14,38 +13,9 @@ import logging
 import six
 
 from djangojsonmodel.db import m2m_relations, get_all_related_objects, get_field, is_reverse_fk
+from djangojsonmodel.util import DotDict
 
 logger = logging.getLogger(__name__)
-
-class DotDict(dict):
-    def __getattr__(self, attr):
-        return self.get(attr, None)
-    __setattr__= dict.__setitem__
-    __delattr__= dict.__delitem__
-
-def implied_relations():
-    phantom_models = [{
-        'model': ContentType,
-        'field': 'content_type',
-        'relname': 'contenttype',
-        'verbose_name': 'Content Type',}]
-    fields = []
-    for k, model in enumerate(phantom_models):
-        f = DotDict()
-        f.required = False
-        rel_name = model['field']
-        reverse_parent = model['model']
-        rel_name_model = model['relname']
-        f.m2m = False
-        f.reverse_fk = True
-        f.child = rel_name_model
-        f.model = rel_name_model
-        f.name = rel_name
-        f.verbose_name = model['verbose_name']
-        f.type = 'fk'
-        f.implied_relation = True
-        fields.append(f)
-    return fields
 
 def default_field(model):
     return model.default_field() if hasattr(model, 'default_field') else None
@@ -67,16 +37,8 @@ def default(f, model):
             r = f.default
     return r
 
-def field_info(f, model):
-    m = DotDict()
-    m.m2m = isinstance(f, models.ManyToManyField)
-    m.reverse_fk = isinstance(f, models.ManyToOneRel) or isinstance(f, models.ManyToManyRel)
-    m.fk = isinstance(f, models.ForeignKey)
-    m.child = get_field(f).model._meta.object_name
-    m.model = get_field(f).model._meta.object_name
-    m.dname = default_field(model)
-    m.verbose_name = getattr(f, 'verbose_name', None)
-    return m
+def field_keys():
+    return sorted(convert_field(ContentType._meta.get_fields()[0], ContentType).keys())
 
 def convert_field(f, model):
     m = DotDict()
@@ -84,7 +46,13 @@ def convert_field(f, model):
     m.name = f.name
     m.required = required(f, model)
     m.default = default(f, model)
-    m.update(field_info(f, model))
+    m.m2m = isinstance(f, models.ManyToManyField)
+    m.reverse_fk = isinstance(f, models.ManyToOneRel) or isinstance(f, models.ManyToManyRel)
+    m.fk = isinstance(f, models.ForeignKey)
+    m.child = get_field(f).model._meta.object_name
+    m.model = get_field(f).model._meta.object_name
+    m.dname = default_field(model)
+    m.verbose_name = getattr(f, 'verbose_name', None)
     return m
 
 def create(applications=[]):
@@ -96,13 +64,9 @@ def create(applications=[]):
         m = DotDict()
         m.name = model._meta.object_name
         m.fields = []
-        # fields
         for field in model._meta.get_fields():
             jsfield = convert_field(field, model)
             m.fields.append(jsfield)
-        # phantom relations
-        for implied in implied_relations():
-            m.fields.append(implied)
         result.models.setdefault(model._meta.object_name, {})
         result.models[model._meta.object_name] = m
     return result
