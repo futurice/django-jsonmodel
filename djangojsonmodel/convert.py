@@ -17,9 +17,6 @@ from djangojsonmodel.util import DotDict
 
 logger = logging.getLogger(__name__)
 
-def default_field(model):
-    return model.default_field() if hasattr(model, 'default_field') else None
-
 def required(f, model):
     return (f.null is True) or (f.blank is True) or (f.default is not models.fields.NOT_PROVIDED)
 
@@ -40,21 +37,32 @@ def default(f, model):
 def field_keys():
     return sorted(convert_field(ContentType._meta.get_fields()[0], ContentType).keys())
 
+getrel = lambda relation: relation.remote_field if django.VERSION[:2] > (1, 8) else relation.related
+
 def convert_field(f, model):
     m = DotDict()
     m.field = f.__class__.__name__
+    m.model = get_field(f).model._meta.object_name
     m.name = f.name
+    m.verbose_name = getattr(f, 'verbose_name', None)
     m.required = required(f, model)
     m.default = default(f, model)
-    m.m2m = isinstance(f, models.ManyToManyField)
-    m.reverse_fk = isinstance(f, models.ManyToOneRel) or isinstance(f, models.ManyToManyRel)
-    m.fk = isinstance(f, models.ForeignKey)
-    m.child = get_field(f).model._meta.object_name
-    m.model = get_field(f).model._meta.object_name
-    m.dname = default_field(model)
-    m.verbose_name = getattr(f, 'verbose_name', None)
+
+    rel = DotDict()
+    rel.m2m = isinstance(f, models.ManyToManyField)
+    rel.reverse_fk = isinstance(f, models.ManyToOneRel) or isinstance(f, models.ManyToManyRel)
+    rel.fk = isinstance(f, models.ForeignKey)
+    rel.child = getrel(f).model._meta.object_name if getrel(f) else None
+
+    m.rel = rel
+
     m.choices = OrderedDict(getattr(f, 'choices', {}))
     m.choices_ui = OrderedDict(getattr(f, 'choices_ui', {}))
+
+    tmp = DotDict()
+    tmp.field = f
+    m.tmp = tmp
+
     return m
 
 def create(applications=[]):
@@ -66,6 +74,11 @@ def create(applications=[]):
         m = DotDict()
         m.name = model._meta.object_name
         m.fields = []
+
+        tmp = DotDict()
+        tmp.model = model
+        m.tmp = tmp
+
         for field in model._meta.get_fields():
             jsfield = convert_field(field, model)
             m.fields.append(jsfield)
@@ -73,6 +86,13 @@ def create(applications=[]):
         result.models[model._meta.object_name] = m
     return result
 
-def jsmodels(applications=[]):
-    return create(applications)
+def do_prepare(c):
+    for model in c['models']:
+        del c['models'][model]['tmp']
+        for field in c['models'][model]['fields']:
+            del field['tmp']
+    return c
+
+def jsmodels(applications=[], prepare=True):
+    return do_prepare(create(applications)) if prepare else create(applications)
 

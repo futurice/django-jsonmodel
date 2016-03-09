@@ -17,7 +17,7 @@ class ConversionTest(TestCase):
         self.assertEquals(sorted(out['models'].keys()), ['ContentType'])
         self.assertEquals(
                 list(filter(lambda x: x.get('name','')=='logentry',
-                       out['models']['ContentType']['fields']))[0]['reverse_fk'],
+                       out['models']['ContentType']['fields']))[0]['rel']['reverse_fk'],
                 True)
 
     def test_convert_test(self):
