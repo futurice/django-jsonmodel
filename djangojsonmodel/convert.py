@@ -1,10 +1,9 @@
-import django
+from django.apps import apps
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
-from django.apps import apps
+import django
 
 from collections import OrderedDict
-
 import json
 import copy
 import inspect
@@ -53,7 +52,6 @@ def convert_field(f, model):
     rel.reverse_fk = isinstance(f, models.ManyToOneRel) or isinstance(f, models.ManyToManyRel)
     rel.fk = isinstance(f, models.ForeignKey)
     rel.child = getrel(f).model._meta.object_name if getrel(f) else None
-
     m.rel = rel
 
     m.choices = OrderedDict(getattr(f, 'choices', {}))

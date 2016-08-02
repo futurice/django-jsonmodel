@@ -1,8 +1,8 @@
-from django.conf.urls import patterns, include, url
+from __future__ import absolute_import
 
-from django.conf.urls import patterns, include, url
+from django.conf.urls import include, url
 
-from .views import index
+from test.views import index
 
 urlpatterns = [
     url(r'^api/', include('test.urls_api')),
